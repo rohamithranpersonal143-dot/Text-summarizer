@@ -1,83 +1,72 @@
 import streamlit as st
 import google.generativeai as genai
-import json
+from PIL import Image
 
-# Mobile UI Optimization
-st.set_page_config(page_title="EduSummarizer", page_icon="📚", layout="centered")
+# Mobile layout setup
+st.set_page_config(page_title="Pocket Lens", page_icon="📷", layout="centered")
 
-st.title("📚 Lecture Summarizer & Quizzer")
-st.write("Upload text or a PDF to instantly get key summaries and a custom practice quiz.")
+st.title("📷 Mobile Text Scanner")
+st.write("Turn on your camera, snap a photo of any text, and let AI extract it instantly.")
 
-# 1. Secure API Key Setup
-# On Streamlit Cloud, go to App Settings -> Secrets and add: GEMINI_API_KEY = "your_key"
-# If not set in secrets, we provide a text input fallback directly in the app.
+# 1. API Key Authentication (Uses the same secrets setup as before)
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
 else:
     api_key = st.sidebar.text_input("🔑 Enter Gemini API Key:", type="password")
 
 if not api_key:
-    st.info("💡 To start, please enter your free Gemini API Key in the sidebar or add it to Streamlit Secrets!")
+    st.info("💡 Please add your Gemini API Key in the sidebar or Streamlit Secrets to begin.")
     st.stop()
 
-# Configure the Gemini Model
 genai.configure(api_key=api_key)
-model = genai.GenerativeModel('gemini-2.5-flash') # Ultra-fast, perfect for text processing
+model = genai.GenerativeModel('gemini-2.5-flash')
 
-# Initialize Session States to keep data alive on mobile page refreshes
-if "summary" not in st.session_state:
-    st.session_state.summary = ""
-if "quiz_data" not in st.session_state:
-    st.session_state.quiz_data = []
-if "user_answers" not in st.session_state:
-    st.session_state.user_answers = {}
-if "quiz_checked" not in st.session_state:
-    st.session_state.quiz_checked = False
+# 2. Camera Toggle Switch
+if "camera_on" not in st.session_state:
+    st.session_state.camera_on = False
 
-# 2. Input Methods
-input_type = st.radio("Choose Input Type:", ["📋 Paste Lecture Text", "📄 Upload PDF (Text-based)"])
-lecture_text = ""
-
-if input_type == "📋 Paste Lecture Text":
-    lecture_text = st.text_area("Paste your study material or lecture notes here:", height=200, placeholder="Paste paragraphs, slides, or chapters...")
+# Stateful button that switches between turning camera ON or OFF
+if st.session_state.camera_on:
+    if st.button("🔴 Turn Camera OFF", use_container_width=True):
+        st.session_state.camera_on = False
+        st.rerun()
 else:
-    uploaded_file = st.file_uploader("Upload a text-based PDF file", type=["pdf"])
-    if uploaded_file is not None:
-        try:
-            import pypdf
-            pdf_reader = pypdf.PdfReader(uploaded_file)
-            extracted_pages = [page.extract_text() for page in pdf_reader.pages if page.extract_text()]
-            lecture_text = "\n".join(extracted_pages)
-            st.success(f"Successfully extracted text from {len(pdf_reader.pages)} pages!")
-        except ImportError:
-            st.error("Error: Please make sure 'pypdf' is added to your requirements.txt file.")
-            st.stop()
+    if st.button("📷 Turn Camera ON", use_container_width=True):
+        st.session_state.camera_on = True
+        st.rerun()
 
-# 3. Process Button
-if st.button("🚀 Process Material", use_container_width=True):
-    if not lecture_text.strip():
-        st.warning("Please provide some lecture text or a PDF first!")
-    else:
-        with st.spinner("🧠 AI is analyzing and generating your study kit..."):
+# 3. Camera Engine & Visual Processing
+if st.session_state.camera_on:
+    # Opens your phone's native front/back camera feed
+    img_file = st.camera_input("Position your text clearly inside the frame:")
+    
+    if img_file is not None:
+        with st.spinner("🔍 Reading text from image..."):
             try:
-                # Prompt 1: Generate Summary
-                summary_prompt = f"Analyze the following lecture notes. Provide a highly structured summary consisting of exactly 5 critical bullet points. Keep it clear and optimized for quick mobile reading:\n\n{lecture_text}"
-                summary_response = model.generate_content(summary_prompt)
-                st.session_state.summary = summary_response.text
-
-                # Prompt 2: Generate JSON Quiz Data
-                quiz_prompt = (
-                    f"Based on the following lecture notes, generate exactly 3 multiple-choice practice questions. "
-                    f"You must return the response ONLY as a valid JSON array of objects. Do not include markdown code block formatting (like ```json). "
-                    f"Each object must have exactly these keys: 'question', 'options' (an array of 4 text strings), and 'correct_index' (the 0, 1, 2, or 3 index of the right answer).\n\n"
-                    f"Lecture Notes:\n{lecture_text}"
+                # Convert the raw browser upload into a format Python can read
+                img = Image.open(img_file)
+                
+                # Visual Analysis Prompt instruction to Gemini
+                prompt = (
+                    "Look at this image. Extract every piece of text visible in it. "
+                    "Format it cleanly exactly as it appears. Do not summarize or add conversational text, "
+                    "just provide the extracted text so the user can copy it."
                 )
-                quiz_response = model.generate_content(quiz_prompt)
                 
-                # Clean up potential markdown wrappers from API string responses safely
-                raw_json = quiz_response.text.strip().replace("```json", "").replace("```", "")
-                st.session_state.quiz_data = json.loads(raw_json)
+                # Pass both the text instructions AND the raw image to the AI model
+                response = model.generate_content([prompt, img])
                 
+                # 4. Display Extracted Text UI Box
+                st.success("✨ Text Extracted Successfully!")
+                
+                # Code blocks display an automatic 'Copy' button on mobile view browsers
+                st.code(response.text, language="text")
+                
+                # Native web copy button tool interface
+                st.copy_to_clipboard(response.text, before_copy_label="📋 Copy Text to Clipboard", after_copy_label="✅ Text Copied!")
+                
+            except Exception as e:
+                st.error(f"Failed to extract text. Error: {e}")
                 # Reset quiz states for the new session
                 st.session_state.user_answers = {}
                 st.session_state.quiz_checked = False
