@@ -67,8 +67,10 @@ if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
 
     if st.session_state.scanned_text:
         st.success("✨ Text Extracted!")
+        
+        # Display text inside st.code block. 
+        # This provides a native, zero-error copy button in the top right corner of the box on mobile!
         st.code(st.session_state.scanned_text, language="text")
-        st.copy_to_clipboard(st.session_state.scanned_text, before_copy_label="📋 Copy to Clipboard", after_copy_label="✅ Copied!")
         
         # Cool bonus feature: send this scanned text straight to the summarizer tool!
         if st.button("🧠 Send to Summarizer & Quizzer", use_container_width=True):
