@@ -124,26 +124,49 @@ if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
 
         # Action button to process the text right here
         if st.button("🧠 Send to Summarizer & Quizzer", use_container_width=True):
-            st.session_state.summary = ""  # Clear old summary
-            st.session_state.quiz_data = []  # Clear old quiz
-
+            st.session_state.summary = "" # Clear old summary
+            st.session_state.quiz_data = [] # Clear old quiz
+            
             with st.spinner("Parsing text into study materials..."):
                 try:
-                    sum_prompt = f"Provide a highly structured summary consisting of exactly 5 critical bullet points:\n\n{st.session_state.scanned_text}"
-                    sum_response = client.models.generate_content(model=MODEL_NAME, contents=sum_prompt)
-                    st.session_state.summary = sum_response.text
+                    # Single master prompt to save API request tokens/limits
+                    master_prompt = (
+                        "Analyze the following source text. Provide two distinct outputs formatted precisely as requested.\n\n"
+                        "OUTPUT 1: A highly structured summary consisting of exactly 5 critical bullet points.\n\n"
+                        "OUTPUT 2: Exactly 3 multiple-choice practice questions from this text. Format this section strictly as a valid JSON array of objects with keys: 'question', 'options' (array of 4 strings), and 'correct_index' (integer 0-3).\n\n"
+                        "Separate OUTPUT 1 and OUTPUT 2 clearly using the delimiter line: '===SPLIT_HERE==='\n\n"
+                        f"Source Text:\n{st.session_state.scanned_text}"
+                    )
+                    
+                    # Single call to the API
+                    response = client.models.generate_content(model=MODEL_NAME, contents=master_prompt)
+                    raw_output = response.text
+                    
+                    if "===SPLIT_HERE===" in raw_output:
+                        summary_part, quiz_part = raw_output.split("===SPLIT_HERE===", 1)
+                        
+                        # Process and save summary
+                        st.session_state.summary = summary_part.strip()
+                        
+                        # Clean and process JSON quiz data
+                        clean_json = quiz_part.strip().replace("```json", "").replace("```", "")
+                        st.session_state.quiz_data = json.loads(clean_json)
+                    else:
+                        # Fallback parsing if the delimiter fails
+                        st.session_state.summary = raw_output
+                        st.warning("Could not cleanly separate the quiz. Please try again.")
 
-                    quiz_prompt = f"Generate exactly 3 multiple-choice practice questions from this text. Return ONLY a valid JSON array of objects with keys: 'question', 'options' (array of 4 strings), and 'correct_index' (integer 0-3).\n\n{st.session_state.scanned_text}"
-                    quiz_response = client.models.generate_content(model=MODEL_NAME, contents=quiz_prompt)
-
-                    raw_json = quiz_response.text.strip().replace("```json", "").replace("```", "")
-                    st.session_state.quiz_data = json.loads(raw_json)
                     st.session_state.user_answers = {}
                     st.session_state.quiz_checked = False
                     st.toast("Generated! See your summary and quiz below.")
                     st.rerun()
+                    
                 except Exception as e:
-                    st.error(f"Processing failed: {e}")
+                    if "429" in str(e):
+                        st.error("⏳ Google's free tier limit reached. Please wait 30-60 seconds before trying again!")
+                    else:
+                        st.error(f"Processing failed: {e}")
+
 
         # Renders the layout widgets directly underneath the extraction card
         display_summary_and_quiz()
