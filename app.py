@@ -1,12 +1,10 @@
 import streamlit as st
-from google import genai  # Modern production SDK
+from google import genai
 import json
 from PIL import Image
 
-# Mobile Layout Setup
 st.set_page_config(page_title="My Study Buddy", page_icon="📱", layout="centered")
 
-# 1. Secure API Key Authentication
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
 else:
@@ -16,55 +14,84 @@ if not api_key:
     st.info("💡 Please add your Gemini API Key in the sidebar or Streamlit Secrets to begin.")
     st.stop()
 
-# Initialize the modern standard client and model configuration
 client = genai.Client(api_key=api_key)
 MODEL_NAME = "gemini-2.5-flash"
 
-# Initialize ALL session states at the top to prevent missing attribute errors
-if "summary" not in st.session_state:
-    st.session_state.summary = ""
-if "quiz_data" not in st.session_state:
-    st.session_state.quiz_data = []
-if "user_answers" not in st.session_state:
-    st.session_state.user_answers = {}
-if "quiz_checked" not in st.session_state:
-    st.session_state.quiz_checked = False
-if "scanned_text" not in st.session_state:
-    st.session_state.scanned_text = ""
+LANGUAGE = st.sidebar.selectbox(
+    "🌍 Study Language",
+    [
+        "English",
+        "Bahasa Melayu",
+        "中文 (Chinese)",
+        "தமிழ் (Tamil)",
+        "日本語 (Japanese)",
+        "한국어 (Korean)",
+        "Español (Spanish)",
+        "Français (French)",
+        "Deutsch (German)"
+    ]
+)
+
+defaults = {
+    "summary": "",
+    "quiz_data": [],
+    "user_answers": {},
+    "quiz_checked": False,
+    "scanned_text": "",
+    "camera_on": False
+}
+
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 
-# Helper function to display quiz results cleanly across tabs
+def extract_json_array(text):
+    if not text:
+        raise ValueError("Empty response from Gemini")
+
+    text = text.replace("```json", "").replace("```", "").strip()
+
+    start = text.find("[")
+    end = text.rfind("]")
+
+    if start == -1 or end == -1:
+        raise ValueError(f"No JSON array found:\n{text[:500]}")
+
+    return json.loads(text[start:end + 1])
+
+
 def display_summary_and_quiz():
-    # Display Summary Results
     if st.session_state.summary:
         st.divider()
         st.header("📝 Smart Summary")
         st.write(st.session_state.summary)
 
-    # Display Quiz Results
     if st.session_state.quiz_data:
         st.divider()
         st.header("🧠 Practice Quiz")
+
         for q_idx, q_item in enumerate(st.session_state.quiz_data):
             st.subheader(f"Q{q_idx + 1}: {q_item['question']}")
 
-            # Form-based tracking for selected radio values
-            chosen_option = st.radio(
+            selected = st.radio(
                 "Select answer:",
-                q_item['options'],
+                q_item["options"],
                 key=f"q_{q_idx}",
-                index=None if f"q_{q_idx}" not in st.session_state.user_answers else q_item['options'].index(
-                    st.session_state.user_answers[f"q_{q_idx}"])
+                index=None
             )
-            if chosen_option:
-                st.session_state.user_answers[f"q_{q_idx}"] = chosen_option
+
+            if selected:
+                st.session_state.user_answers[f"q_{q_idx}"] = selected
 
             if st.session_state.quiz_checked:
-                correct_ans = q_item['options'][q_item['correct_index']]
-                if chosen_option == correct_ans:
+                correct = q_item["options"][q_item["correct_index"]]
+
+                if selected == correct:
                     st.success("✅ Correct!")
                 else:
-                    st.error(f"❌ Incorrect. Correct answer: {correct_ans}")
+                    st.error(f"❌ Correct answer: {correct}")
+
             st.write("---")
 
         if not st.session_state.quiz_checked:
@@ -78,19 +105,64 @@ def display_summary_and_quiz():
                 st.rerun()
 
 
-# 2. Top Navigation Menu for Mobile
-app_mode = st.selectbox("🗺️ Choose Feature:",
-                        ["📷 1. Text Scanner (Google Lens Mode)", "📚 2. Text/PDF Summarizer & Quizzer"])
+def generate_study_material(text_source):
+    master_prompt = f"""
+Analyze the source material.
 
-# ==========================================
-# FEATURE 1: CAMERA TEXT SCANNER
-# ==========================================
-if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
+OUTPUT 1:
+Exactly 5 critical bullet points.
+Write entirely in {LANGUAGE}.
+
+OUTPUT 2:
+Exactly 3 multiple-choice questions.
+Write entirely in {LANGUAGE}.
+
+Return OUTPUT 2 as JSON only.
+
+Use:
+===SPLIT_HERE===
+
+JSON format:
+
+[
+  {{
+    "question":"Question",
+    "options":["A","B","C","D"],
+    "correct_index":0
+  }}
+]
+
+Source:
+{text_source}
+"""
+
+    response = client.models.generate_content(
+        model=MODEL_NAME,
+        contents=master_prompt
+    )
+
+    raw_output = response.text
+
+    if "===SPLIT_HERE===" not in raw_output:
+        st.session_state.summary = raw_output
+        return
+
+    summary_part, quiz_part = raw_output.split("===SPLIT_HERE===", 1)
+
+    st.session_state.summary = summary_part.strip()
+    st.session_state.quiz_data = extract_json_array(quiz_part)
+    st.session_state.user_answers = {}
+    st.session_state.quiz_checked = False
+
+
+app_mode = st.selectbox(
+    "🗺️ Choose Feature:",
+    ["📷 1. Text Scanner (Google Lens Mode)",
+     "📚 2. Text/PDF Summarizer & Quizzer"]
+)
+
+if app_mode.startswith("📷"):
     st.title("📷 Mobile Text Scanner")
-    st.write("Snap a photo of a book, paper, or screen to instantly extract and copy the text.")
-
-    if "camera_on" not in st.session_state:
-        st.session_state.camera_on = False
 
     if st.session_state.camera_on:
         if st.button("🔴 Turn Camera OFF", use_container_width=True):
@@ -102,117 +174,74 @@ if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
             st.rerun()
 
     if st.session_state.camera_on:
-        img_file = st.camera_input("Position your text clearly in the frame:")
-        if img_file is not None:
-            with st.spinner("🔍 AI is reading the text..."):
-                try:
-                    img = Image.open(img_file)
-                    prompt = "Look at this image. Extract every piece of text visible in it. Format it cleanly exactly as it appears. Do not summarize or add chat text, just give the text."
-                    response = client.models.generate_content(
-                        model=MODEL_NAME,
-                        contents=[prompt, img]
-                    )
-                    st.session_state.scanned_text = response.text
-                except Exception as e:
-                    st.error(f"Failed to scan text: {e}")
+        img_file = st.camera_input("Take a photo")
+
+        if img_file:
+            try:
+                img = Image.open(img_file)
+
+                response = client.models.generate_content(
+                    model=MODEL_NAME,
+                    contents=[
+                        "Extract all visible text exactly as written.",
+                        img
+                    ]
+                )
+
+                st.session_state.scanned_text = response.text
+
+            except Exception as e:
+                st.error(f"OCR failed: {e}")
 
     if st.session_state.scanned_text:
-        st.success("✨ Text Extracted!")
+        st.code(st.session_state.scanned_text)
 
-        # Display text inside st.code block for easy copy-paste actions
-        st.code(st.session_state.scanned_text, language="text")
-
-        # Action button to process the text right here
         if st.button("🧠 Send to Summarizer & Quizzer", use_container_width=True):
-            st.session_state.summary = "" # Clear old summary
-            st.session_state.quiz_data = [] # Clear old quiz
-            
-            with st.spinner("Parsing text into study materials..."):
-                try:
-                    # Single master prompt to save API request tokens/limits
-                    master_prompt = (
-                        "Analyze the following source text. Provide two distinct outputs formatted precisely as requested.\n\n"
-                        "OUTPUT 1: A highly structured summary consisting of exactly 5 critical bullet points.\n\n"
-                        "OUTPUT 2: Exactly 3 multiple-choice practice questions from this text. Format this section strictly as a valid JSON array of objects with keys: 'question', 'options' (array of 4 strings), and 'correct_index' (integer 0-3).\n\n"
-                        "Separate OUTPUT 1 and OUTPUT 2 clearly using the delimiter line: '===SPLIT_HERE==='\n\n"
-                        f"Source Text:\n{st.session_state.scanned_text}"
-                    )
-                    
-                    # Single call to the API
-                    response = client.models.generate_content(model=MODEL_NAME, contents=master_prompt)
-                    raw_output = response.text
-                    
-                    if "===SPLIT_HERE===" in raw_output:
-                        summary_part, quiz_part = raw_output.split("===SPLIT_HERE===", 1)
-                        
-                        # Process and save summary
-                        st.session_state.summary = summary_part.strip()
-                        
-                        # Clean and process JSON quiz data
-                        clean_json = quiz_part.strip().replace("```json", "").replace("```", "")
-                        st.session_state.quiz_data = json.loads(clean_json)
-                    else:
-                        # Fallback parsing if the delimiter fails
-                        st.session_state.summary = raw_output
-                        st.warning("Could not cleanly separate the quiz. Please try again.")
+            try:
+                generate_study_material(st.session_state.scanned_text)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Processing failed: {e}")
 
-                    st.session_state.user_answers = {}
-                    st.session_state.quiz_checked = False
-                    st.toast("Generated! See your summary and quiz below.")
-                    st.rerun()
-                    
-                except Exception as e:
-                    if "429" in str(e):
-                        st.error("⏳ Google's free tier limit reached. Please wait 30-60 seconds before trying again!")
-                    else:
-                        st.error(f"Processing failed: {e}")
-
-
-        # Renders the layout widgets directly underneath the extraction card
         display_summary_and_quiz()
 
-# ==========================================
-# FEATURE 2: SUMMARIZER & QUIZZER
-# ==========================================
 else:
     st.title("📚 My Study Buddy")
-    st.write("Upload a file or paste text to generate custom summaries and quizzes.")
 
-    input_type = st.radio("Choose Input Type:", ["📋 Paste Text", "📄 Upload PDF"])
+    input_type = st.radio(
+        "Choose Input Type:",
+        ["📋 Paste Text", "📄 Upload PDF"]
+    )
+
     lecture_text = ""
 
     if input_type == "📋 Paste Text":
-        lecture_text = st.text_area("Paste material here:", height=150)
+        lecture_text = st.text_area("Paste material here:", height=200)
+
     else:
-        uploaded_file = st.file_uploader("Upload text PDF", type=["pdf"])
-        if uploaded_file is not None:
+        uploaded_file = st.file_uploader("Upload PDF", type=["pdf"])
+
+        if uploaded_file:
             import pypdf
 
-            pdf_reader = pypdf.PdfReader(uploaded_file)
-            lecture_text = "\n".join([page.extract_text() for page in pdf_reader.pages if page.extract_text()])
+            reader = pypdf.PdfReader(uploaded_file)
+
+            lecture_text = "\\n".join(
+                page.extract_text()
+                for page in reader.pages
+                if page.extract_text()
+            )
 
     if st.button("🚀 Process Material", use_container_width=True):
+
         if not lecture_text.strip():
-            st.warning("Please provide text or a PDF file first!")
+            st.warning("Please provide text first.")
         else:
-            with st.spinner("🧠 AI is building your study kit..."):
-                try:
-                    sum_response = client.models.generate_content(
-                        model=MODEL_NAME,
-                        contents=f"Provide a summary of exactly 5 critical bullet points:\n\n{lecture_text}"
-                    )
-                    st.session_state.summary = sum_response.text
+            try:
+                generate_study_material(lecture_text)
+                st.rerun()
 
-                    quiz_prompt = f"Generate exactly 3 multiple-choice questions. Return ONLY a valid JSON array of objects with keys: 'question', 'options' (array of 4 strings), and 'correct_index' (integer 0-3).\n\n{lecture_text}"
-                    quiz_response = client.models.generate_content(model=MODEL_NAME, contents=quiz_prompt)
+            except Exception as e:
+                st.error(f"Error processing: {e}")
 
-                    raw_json = quiz_response.text.strip().replace("```json", "").replace("```", "")
-                    st.session_state.quiz_data = json.loads(raw_json)
-                    st.session_state.user_answers = {}
-                    st.session_state.quiz_checked = False
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error processing: {e}")
-
-    # Renders the metrics and modules inline
     display_summary_and_quiz()
