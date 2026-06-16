@@ -1,5 +1,6 @@
 import streamlit as st
 from google import genai  # Modern production SDK
+from google.genai import types  # Required for configuration types
 import json
 from PIL import Image
 
@@ -154,13 +155,8 @@ if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
                         # Process and save summary
                         st.session_state.summary = summary_part.strip()
                         
-                        # Clean and process JSON quiz data robustly
-                        clean_json = quiz_part.strip()
-                        if "```json" in clean_json:
-                            clean_json = clean_json.split("```json")[1].split("```")[0].strip()
-                        elif "```" in clean_json:
-                            clean_json = clean_json.split("```")[1].split("```")[0].strip()
-                        
+                        # Clean and process JSON quiz data
+                        clean_json = quiz_part.strip().replace("```json", "").replace("```", "").strip()
                         st.session_state.quiz_data = json.loads(clean_json)
                     else:
                         # Fallback parsing if the delimiter fails
