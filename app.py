@@ -1,15 +1,18 @@
 import streamlit as st
-from google import genai
+from google import genai  # Modern production SDK
 import json
 from PIL import Image
 
+# Mobile Layout Setup
 st.set_page_config(page_title="My Study Buddy", page_icon="📱", layout="centered")
 
+# 1. Secure API Key Authentication
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
 else:
     api_key = st.sidebar.text_input("🔑 Enter Gemini API Key:", type="password")
 
+# --- Language Selection added to the sidebar ---
 selected_language = st.sidebar.selectbox(
     "🌐 Choose Output Language:",
     ["English", "Spanish", "French", "German", "Chinese", "Malay", "Japanese", "Arabic"]
@@ -19,9 +22,11 @@ if not api_key:
     st.info("💡 Please add your Gemini API Key in the sidebar or Streamlit Secrets to begin.")
     st.stop()
 
+# Initialize the modern standard client and model configuration
 client = genai.Client(api_key=api_key)
 MODEL_NAME = "gemini-2.5-flash"
 
+# Initialize ALL session states at the top to prevent missing attribute errors
 if "summary" not in st.session_state:
     st.session_state.summary = ""
 if "quiz_data" not in st.session_state:
@@ -34,18 +39,22 @@ if "scanned_text" not in st.session_state:
     st.session_state.scanned_text = ""
 
 
+# Helper function to display quiz results cleanly across tabs
 def display_summary_and_quiz():
+    # Display Summary Results
     if st.session_state.summary:
         st.divider()
         st.header("📝 Smart Summary")
         st.write(st.session_state.summary)
 
+    # Display Quiz Results
     if st.session_state.quiz_data:
         st.divider()
         st.header("🧠 Practice Quiz")
         for q_idx, q_item in enumerate(st.session_state.quiz_data):
             st.subheader(f"Q{q_idx + 1}: {q_item['question']}")
 
+            # Form-based tracking for selected radio values
             chosen_option = st.radio(
                 "Select answer:",
                 q_item['options'],
@@ -75,9 +84,13 @@ def display_summary_and_quiz():
                 st.rerun()
 
 
+# 2. Top Navigation Menu for Mobile
 app_mode = st.selectbox("🗺️ Choose Feature:",
                         ["📷 1. Text Scanner (Google Lens Mode)", "📚 2. Text/PDF Summarizer & Quizzer"])
 
+# ==========================================
+# FEATURE 1: CAMERA TEXT SCANNER
+# ==========================================
 if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
     st.title("📷 Mobile Text Scanner")
     st.write("Snap a photo of a book, paper, or screen to instantly extract and copy the text.")
@@ -112,14 +125,17 @@ if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
     if st.session_state.scanned_text:
         st.success("✨ Text Extracted!")
 
+        # Display text inside st.code block for easy copy-paste actions
         st.code(st.session_state.scanned_text, language="text")
 
+        # Action button to process the text right here
         if st.button("🧠 Send to Summarizer & Quizzer", use_container_width=True):
-            st.session_state.summary = "" 
-            st.session_state.quiz_data = [] 
+            st.session_state.summary = "" # Clear old summary
+            st.session_state.quiz_data = [] # Clear old quiz
             
             with st.spinner(f"Parsing text into study materials in {selected_language}..."):
                 try:
+                    # Single master prompt to save API request tokens/limits
                     master_prompt = (
                         f"Analyze the following source text. Provide two distinct outputs formatted precisely as requested. Both outputs must be completely written in the following language: {selected_language}.\n\n"
                         f"OUTPUT 1: A highly structured summary consisting of exactly 5 critical bullet points written in {selected_language}.\n\n"
@@ -128,17 +144,26 @@ if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
                         f"Source Text:\n{st.session_state.scanned_text}"
                     )
                     
+                    # Single call to the API
                     response = client.models.generate_content(model=MODEL_NAME, contents=master_prompt)
                     raw_output = response.text
                     
                     if "===SPLIT_HERE===" in raw_output:
                         summary_part, quiz_part = raw_output.split("===SPLIT_HERE===", 1)
                         
+                        # Process and save summary
                         st.session_state.summary = summary_part.strip()
                         
-                        clean_json = quiz_part.strip().replace("```json", "").replace("```", "")
+                        # Clean and process JSON quiz data robustly
+                        clean_json = quiz_part.strip()
+                        if "```json" in clean_json:
+                            clean_json = clean_json.split("```json")[1].split("```")[0].strip()
+                        elif "```" in clean_json:
+                            clean_json = clean_json.split("```")[1].split("```")[0].strip()
+                        
                         st.session_state.quiz_data = json.loads(clean_json)
                     else:
+                        # Fallback parsing if the delimiter fails
                         st.session_state.summary = raw_output
                         st.warning("Could not cleanly separate the quiz. Please try again.")
 
@@ -153,8 +178,13 @@ if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
                     else:
                         st.error(f"Processing failed: {e}")
 
+
+        # Renders the layout widgets directly underneath the extraction card
         display_summary_and_quiz()
 
+# ==========================================
+# FEATURE 2: SUMMARIZER & QUIZZER
+# ==========================================
 else:
     st.title("📚 My Study Buddy")
     st.write("Upload a file or paste text to generate custom summaries and quizzes.")
@@ -184,15 +214,3 @@ else:
                     )
                     st.session_state.summary = sum_response.text
 
-                    quiz_prompt = f"Generate exactly 3 multiple-choice questions based on the text. The questions and options must be written completely in the following language: {selected_language}. Return ONLY a valid JSON array of objects with keys: 'question', 'options' (array of 4 strings), and 'correct_index' (integer 0-3).\n\n{lecture_text}"
-                    quiz_response = client.models.generate_content(model=MODEL_NAME, contents=quiz_prompt)
-
-                    raw_json = quiz_response.text.strip().replace("```json", "").replace("```", "")
-                    st.session_state.quiz_data = json.loads(raw_json)
-                    st.session_state.user_answers = {}
-                    st.session_state.quiz_checked = False
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error processing: {e}")
-
-    display_summary_and_quiz()
