@@ -102,7 +102,8 @@ app_mode = st.selectbox("🗺️ Choose Feature:",
 if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
     st.title("📷 Mobile Text Scanner")
     st.write("Snap a photo of a book, paper, or screen to instantly extract and copy the text.")
-if st.session_state.camera_on:
+
+    if st.session_state.camera_on:
         if st.button("🔴 Turn Camera OFF", use_container_width=True):
             st.session_state.camera_on = False
             st.rerun()
@@ -206,4 +207,4 @@ else:
             
             with st.spinner(f"🧠 AI is building your study kit in {selected_language}..."):
                 try:
-                    # Single master prompt approach used here to keep it 
+                    # Single master prompt approach used here to keep it identical to the camera processing logic
