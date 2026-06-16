@@ -137,13 +137,7 @@ if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
             with st.spinner(f"Parsing text into study materials in {selected_language}..."):
                 try:
                     # Single master prompt to save API request tokens/limits
-                    master_prompt = (
-                        f"Analyze the following source text. Provide two distinct outputs formatted precisely as requested. Both outputs must be completely written in the following language: {selected_language}.\n\n"
-                        f"OUTPUT 1: A highly structured summary consisting of exactly 5 critical bullet points written in {selected_language}.\n\n"
-                        f"OUTPUT 2: Exactly 3 multiple-choice practice questions from this text. The questions, choices, and data must be written in {selected_language}. Format this section strictly as a valid JSON array of objects with keys: 'question', 'options' (array of 4 strings), and 'correct_index' (integer 0-3).\n\n"
-                        "Separate OUTPUT 1 and OUTPUT 2 clearly using the delimiter line: '===SPLIT_HERE==='\n\n"
-                        f"Source Text:\n{st.session_state.scanned_text}"
-                    )
+                    master_prompt = f"Analyze the following source text. Provide two distinct outputs formatted precisely as requested. Both outputs must be completely written in the following language: {selected_language}.\n\nOUTPUT 1: A highly structured summary consisting of exactly 5 critical bullet points written in {selected_language}.\n\nOUTPUT 2: Exactly 3 multiple-choice practice questions from this text. The questions, choices, and data must be written in {selected_language}. Format this section strictly as a valid JSON array of objects with keys: 'question', 'options' (array of 4 strings), and 'correct_index' (integer 0-3).\n\nSeparate OUTPUT 1 and OUTPUT 2 clearly using the delimiter line: '===SPLIT_HERE==='\n\nSource Text:\n{st.session_state.scanned_text}"
                     
                     # Single call to the API
                     response = client.models.generate_content(model=MODEL_NAME, contents=master_prompt)
@@ -155,9 +149,15 @@ if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
                         # Process and save summary
                         st.session_state.summary = summary_part.strip()
                         
-                        # Clean and process JSON quiz data
-                        clean_json = quiz_part.strip().replace("```json", "").replace("```", "")
-                        st.session_state.quiz_data = json.loads(clean_json)
+                        # Isolate array JSON data safely using substring mechanics
+                        start_idx = quiz_part.find("[")
+                        end_idx = quiz_part.rfind("]") + 1
+                        
+                        if start_idx != -1 and end_idx != 0:
+                            clean_json = quiz_part[start_idx:end_idx]
+                            st.session_state.quiz_data = json.loads(clean_json)
+                        else:
+                            st.session_state.quiz_data = json.loads(quiz_part.strip().replace("```json", "").replace("```", ""))
                     else:
                         # Fallback parsing if the delimiter fails
                         st.session_state.summary = raw_output
@@ -209,5 +209,3 @@ else:
                         contents=f"Provide a summary of exactly 5 critical bullet points. The entire summary must be written in the following language: {selected_language}:\n\n{lecture_text}"
                     )
                     st.session_state.summary = sum_response.text
-
-                    quiz_prompt = f"Generate exactly 3 multiple-choice questions. Return a valid JSON array of objects with keys: 'question', 'options' (array of 4 strings), and 'correct_index' (integer 0-3). The text structure must be strictly in the following language: {selected_language}.\n\n{lecture_text}"
