@@ -13,7 +13,7 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     api_key = st.sidebar.text_input("🔑 Enter Gemini API Key:", type="password")
 
-# --- Language Selection added to the sidebar ---
+# Language Selection
 selected_language = st.sidebar.selectbox(
     "🌐 Choose Output Language:",
     ["English", "Spanish", "French", "German", "Chinese", "Malay", "Japanese", "Arabic"]
@@ -156,7 +156,7 @@ if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
                         st.session_state.summary = summary_part.strip()
                         
                         # Clean and process JSON quiz data
-                        clean_json = quiz_part.strip().replace("```json", "").replace("```", "").strip()
+                        clean_json = quiz_part.strip().replace("```json", "").replace("```", "")
                         st.session_state.quiz_data = json.loads(clean_json)
                     else:
                         # Fallback parsing if the delimiter fails
@@ -210,3 +210,4 @@ else:
                     )
                     st.session_state.summary = sum_response.text
 
+                    quiz_prompt = f"Generate exactly 3 multiple-choice questions. Return a valid JSON array of objects with keys: 'question', 'options' (array of 4 strings), and 'correct_index' (integer 0-3). The text structure must be strictly in the following language: {selected_language}.\n\n{lecture_text}"
