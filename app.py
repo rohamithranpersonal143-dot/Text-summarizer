@@ -219,4 +219,38 @@ else:
 
     if st.button("🚀 Process Material", use_container_width=True):
         if not lecture_text.strip():
-           st.warning("Please provide text or a PDF file first!")else:with st.spinner(f"🧠 AI is building your study kit in {selected_language}..."):try:sum_response = client.chat.completions.create(model=MODEL_NAME,messages=[{"role": "user", "content": f"Provide a summary of exactly 5 critical bullet points. The entire summary must be written in the following language: {selected_language}:\n\n{lecture_text}"}])st.session_state.summary = sum_response.choices.message.contentquiz_prompt = f"Generate a JSON object containing a valid JSON array matching the key 'questions' consisting of exactly 10 multiple-choice questions based on the text context provided. Each nested object contains keys: 'question', 'options' (array of 4 strings), and 'correct_index' (integer 0-3). The text structure must be strictly in the following language: {selected_language}.\n\n{lecture_text}"# Force strict JSON formatting via Groq parameters directlyquiz_response = client.chat.completions.create(model=MODEL_NAME,messages=[{"role": "user", "content": quiz_prompt}],response_format={"type": "json_object"})raw_json = quiz_response.choices.message.content.strip()# Process top-level structural encapsulation rules required by groq dynamic profiles safelyparsed_data = json.loads(raw_json)if isinstance(parsed_data, dict) and "questions" in parsed_data:st.session_state.quiz_data = parsed_data["questions"]elif isinstance(parsed_data, dict) and len(parsed_data.keys()) == 1:st.session_state.quiz_data = list(parsed_data.values())[0]else:st.session_state.quiz_data = parsed_datast.session_state.user_answers = {}st.session_state.quiz_checked = Falsest.rerun()except Exception as e:st.error(f"Error processing: {e}")# Renders the metrics and modules inlinedisplay_summary_and_quiz(){content: }
+         else:
+            with st.spinner(f"🧠 AI is building your study kit in {selected_language}..."):
+                try:
+                    sum_response = client.chat.completions.create(
+                        model=MODEL_NAME,
+                        messages=[{"role": "user", "content": f"Provide a summary of exactly 5 critical bullet points. The entire summary must be written in the following language: {selected_language}:\n\n{lecture_text}"}]
+                    )
+                    st.session_state.summary = sum_response.choices.message.content
+
+                    quiz_prompt = f"Generate a JSON object containing a valid JSON array matching the key 'questions' consisting of exactly 10 multiple-choice questions based on the text context provided. Each nested object contains keys: 'question', 'options' (array of 4 strings), and 'correct_index' (integer 0-3). The text structure must be strictly in the following language: {selected_language}.\n\n{lecture_text}"
+                    
+                    quiz_response = client.chat.completions.create(
+                        model=MODEL_NAME, 
+                        messages=[{"role": "user", "content": quiz_prompt}],
+                        response_format={"type": "json_object"}
+                    )
+
+                    raw_json = quiz_response.choices.message.content.strip()
+                    
+                    parsed_data = json.loads(raw_json)
+                    if isinstance(parsed_data, dict) and "questions" in parsed_data:
+                        st.session_state.quiz_data = parsed_data["questions"]
+                    elif isinstance(parsed_data, dict) and len(parsed_data.keys()) == 1:
+                        st.session_state.quiz_data = list(parsed_data.values())[0]
+                    else:
+                        st.session_state.quiz_data = parsed_data
+                        
+                    st.session_state.user_answers = {}
+                    st.session_state.quiz_checked = False
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error processing: {e}")
+
+    # Renders the metrics and modules inline
+    display_summary_and_quiz()
