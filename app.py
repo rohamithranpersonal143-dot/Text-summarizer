@@ -4,6 +4,7 @@ import json
 from PIL import Image
 import io
 import base64
+import pypdf
 
 # ==========================================
 # PAGE SETUP
@@ -15,8 +16,11 @@ st.set_page_config(
 )
 
 # ==========================================
-# API KEY
+# SIDEBAR CONTROLS (UPDATED)
 # ==========================================
+st.sidebar.title("⚙️ Settings")
+
+# API KEY (from secrets or manual)
 if "GROQ_API_KEY" in st.secrets:
     api_key = st.secrets["GROQ_API_KEY"]
 else:
@@ -25,16 +29,25 @@ else:
         type="password"
     )
 
-# ==========================================
-# SIDEBAR CONTROLS
-# ==========================================
+# LANGUAGE (NOW INCLUDES TAMIL 🗿)
 selected_language = st.sidebar.selectbox(
-    "🌐 Choose Output Language:",
-    ["English", "Spanish", "French", "German", "Chinese", "Malay", "Japanese", "Arabic"]
+    "🌐 Output Language:",
+    [
+        "English",
+        "Malay",
+        "Tamil",
+        "Spanish",
+        "French",
+        "German",
+        "Chinese",
+        "Japanese",
+        "Arabic"
+    ]
 )
 
+# DIFFICULTY
 difficulty_level = st.sidebar.selectbox(
-    "🎯 Choose Difficulty Level:",
+    "🎯 Difficulty Level:",
     [
         "Kindergarten",
         "Year 1",
@@ -48,6 +61,12 @@ difficulty_level = st.sidebar.selectbox(
     ]
 )
 
+st.sidebar.markdown("---")
+st.sidebar.caption("Settings apply to summaries + quizzes")
+
+# ==========================================
+# SAFETY CHECK
+# ==========================================
 if not api_key:
     st.info("Add your Groq API key to continue.")
     st.stop()
@@ -56,6 +75,7 @@ client = Groq(api_key=api_key)
 
 VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 TEXT_MODEL = "llama-3.3-70b-versatile"
+
 # ==========================================
 # SESSION STATE
 # ==========================================
@@ -65,9 +85,10 @@ for key in ["summary", "quiz_data", "user_answers", "quiz_checked", "scanned_tex
             st.session_state[key] = []
         elif key == "user_answers":
             st.session_state[key] = {}
+        elif key == "quiz_checked":
+            st.session_state[key] = False
         else:
-            st.session_state[key] = "" if key != "quiz_checked" else False
-
+            st.session_state[key] = ""
 
 # ==========================================
 # DISPLAY FUNCTION
@@ -130,21 +151,16 @@ def display_summary_and_quiz():
                 st.session_state.user_answers = {}
                 st.session_state.quiz_checked = False
                 st.rerun()
-# ==========================================
-# NAVIGATION
-# ==========================================
-app_mode = st.selectbox(
-    "🗺️ Choose Feature:",
-    [
-        "📷 Text Scanner (Google Lens Mode)",
-        "📚 Summarizer & Quizzer"
-    ]
-)
 
 # ==========================================
-# FEATURE 1
+# TABS (REPLACES "Choose Feature")
 # ==========================================
-if app_mode == "📷 Text Scanner (Google Lens Mode)":
+tab1, tab2 = st.tabs(["📷 Text Scanner", "📚 Study Buddy"])
+
+# ==========================================
+# FEATURE 1: SCANNER
+# ==========================================
+with tab1:
 
     st.title("📷 Mobile Text Scanner")
 
@@ -179,14 +195,15 @@ if app_mode == "📷 Text Scanner (Google Lens Mode)":
                         "role": "user",
                         "content": [
                             {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
-                        ]
+                            {"type": "image_url": {"image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
+                        }
                     }],
                     temperature=0
                 )
 
                 st.session_state.scanned_text = response.choices[0].message.content
-if st.session_state.scanned_text:
+
+    if st.session_state.scanned_text:
 
         st.success("Text extracted")
         st.code(st.session_state.scanned_text)
@@ -234,7 +251,6 @@ TEXT:
             raw = response.choices[0].message.content
 
             if "===SPLIT_HERE===" in raw:
-
                 summary, quiz = raw.split("===SPLIT_HERE===")
 
                 st.session_state.summary = summary.strip()
@@ -250,7 +266,11 @@ TEXT:
             st.rerun()
 
         display_summary_and_quiz()
-else:
+
+# ==========================================
+# FEATURE 2: STUDY BUDDY
+# ==========================================
+with tab2:
 
     st.title("📚 My Study Buddy")
 
@@ -265,7 +285,6 @@ else:
         file = st.file_uploader("Upload PDF", type=["pdf"])
 
         if file:
-            import pypdf
             reader = pypdf.PdfReader(file)
             text = "\n".join([p.extract_text() or "" for p in reader.pages])
 
