@@ -1,24 +1,31 @@
 import streamlit as st
-from google import genai  # Modern production SDK
+from groq import Groq
 import json
 from PIL import Image
+import io
 
 # Mobile Layout Setup
 st.set_page_config(page_title="My Study Buddy", page_icon="📱", layout="centered")
 
 # 1. Secure API Key Authentication
-if "GEMINI_API_KEY" in st.secrets:
-    api_key = st.secrets["GEMINI_API_KEY"]
+if "GROQ_API_KEY" in st.secrets:
+    api_key = st.secrets["GROQ_API_KEY"]
 else:
-    api_key = st.sidebar.text_input("🔑 Enter Gemini API Key:", type="password")
+    api_key = st.sidebar.text_input("🔑 Enter Groq API Key:", type="password")
+
+# Language Selection
+selected_language = st.sidebar.selectbox(
+    "🌐 Choose Output Language:",
+    ["English", "Spanish", "French", "German", "Chinese", "Malay", "Japanese", "Arabic"]
+)
 
 if not api_key:
-    st.info("💡 Please add your Gemini API Key in the sidebar or Streamlit Secrets to begin.")
+    st.info("💡 Please add your Groq API Key in the sidebar or Streamlit Secrets to begin.")
     st.stop()
 
-# Initialize the modern standard client and model configuration
-client = genai.Client(api_key=api_key)
-MODEL_NAME = "gemini-2.5-flash"
+# Initialize the Groq standard client and model configuration
+client = Groq(api_key=api_key)
+MODEL_NAME = "llama-3.2-11b-vision-preview"
 
 # Initialize ALL session states at the top to prevent missing attribute errors
 if "summary" not in st.session_state:
@@ -107,12 +114,32 @@ if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
             with st.spinner("🔍 AI is reading the text..."):
                 try:
                     img = Image.open(img_file)
+                    
+                    # Convert PIL Image to bytes for Groq API processing
+                    img_byte_arr = io.BytesIO()
+                    img.save(img_byte_arr, format='JPEG')
+                    img_bytes = img_byte_arr.getvalue()
+
                     prompt = "Look at this image. Extract every piece of text visible in it. Format it cleanly exactly as it appears. Do not summarize or add chat text, just give the text."
-                    response = client.models.generate_content(
+                    
+                    response = client.chat.completions.create(
                         model=MODEL_NAME,
-                        contents=[prompt, img]
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": prompt},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": f"data:image/jpeg;base64,{img_bytes.hex()}"
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
                     )
-                    st.session_state.scanned_text = response.text
+                    st.session_state.scanned_text = response.choices[0].message.content
                 except Exception as e:
                     st.error(f"Failed to scan text: {e}")
 
@@ -127,20 +154,16 @@ if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
             st.session_state.summary = "" # Clear old summary
             st.session_state.quiz_data = [] # Clear old quiz
             
-            with st.spinner("Parsing text into study materials..."):
+            with st.spinner(f"Parsing text into study materials in {selected_language}..."):
                 try:
                     # Single master prompt to save API request tokens/limits
-                    master_prompt = (
-                        "Analyze the following source text. Provide two distinct outputs formatted precisely as requested.\n\n"
-                        "OUTPUT 1: A highly structured summary consisting of exactly 5 critical bullet points.\n\n"
-                        "OUTPUT 2: Exactly 3 multiple-choice practice questions from this text. Format this section strictly as a valid JSON array of objects with keys: 'question', 'options' (array of 4 strings), and 'correct_index' (integer 0-3).\n\n"
-                        "Separate OUTPUT 1 and OUTPUT 2 clearly using the delimiter line: '===SPLIT_HERE==='\n\n"
-                        f"Source Text:\n{st.session_state.scanned_text}"
-                    )
+                    master_prompt = f"Analyze the following source text. Provide two distinct outputs formatted precisely as requested. Both outputs must be completely written in the following language: {selected_language}.\n\nOUTPUT 1: A highly structured summary consisting of exactly 5 critical bullet points written in {selected_language}.\n\nOUTPUT 2: Exactly 10 multiple-choice practice questions from this text. The questions, choices, and data must be written in {selected_language}. Format this section strictly as a valid JSON array of objects with keys: 'question', 'options' (array of 4 strings), and 'correct_index' (integer 0-3).\n\nSeparate OUTPUT 1 and OUTPUT 2 clearly using the delimiter line: '===SPLIT_HERE==='\n\nSource Text:\n{st.session_state.scanned_text}"
                     
-                    # Single call to the API
-                    response = client.models.generate_content(model=MODEL_NAME, contents=master_prompt)
-                    raw_output = response.text
+                    response = client.chat.completions.create(
+                        model=MODEL_NAME,
+                        messages=[{"role": "user", "content": master_prompt}]
+                    )
+                    raw_output = response.choices[0].message.content
                     
                     if "===SPLIT_HERE===" in raw_output:
                         summary_part, quiz_part = raw_output.split("===SPLIT_HERE===", 1)
@@ -148,9 +171,14 @@ if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
                         # Process and save summary
                         st.session_state.summary = summary_part.strip()
                         
-                        # Clean and process JSON quiz data
-                        clean_json = quiz_part.strip().replace("```json", "").replace("```", "")
-                        st.session_state.quiz_data = json.loads(clean_json)
+                        # Clean and process JSON quiz data safely
+                        start_idx = quiz_part.find("[")
+                        end_idx = quiz_part.rfind("]") + 1
+                        if start_idx != -1 and end_idx != 0:
+                            clean_json = quiz_part[start_idx:end_idx]
+                            st.session_state.quiz_data = json.loads(clean_json)
+                        else:
+                            st.session_state.quiz_data = json.loads(quiz_part.strip().replace("```json", "").replace("```", ""))
                     else:
                         # Fallback parsing if the delimiter fails
                         st.session_state.summary = raw_output
@@ -162,10 +190,7 @@ if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
                     st.rerun()
                     
                 except Exception as e:
-                    if "429" in str(e):
-                        st.error("⏳ Google's free tier limit reached. Please wait 30-60 seconds before trying again!")
-                    else:
-                        st.error(f"Processing failed: {e}")
+                    st.error(f"Processing failed: {e}")
 
 
         # Renders the layout widgets directly underneath the extraction card
@@ -193,26 +218,3 @@ else:
 
     if st.button("🚀 Process Material", use_container_width=True):
         if not lecture_text.strip():
-            st.warning("Please provide text or a PDF file first!")
-        else:
-            with st.spinner("🧠 AI is building your study kit..."):
-                try:
-                    sum_response = client.models.generate_content(
-                        model=MODEL_NAME,
-                        contents=f"Provide a summary of exactly 5 critical bullet points:\n\n{lecture_text}"
-                    )
-                    st.session_state.summary = sum_response.text
-
-                    quiz_prompt = f"Generate exactly 3 multiple-choice questions. Return ONLY a valid JSON array of objects with keys: 'question', 'options' (array of 4 strings), and 'correct_index' (integer 0-3).\n\n{lecture_text}"
-                    quiz_response = client.models.generate_content(model=MODEL_NAME, contents=quiz_prompt)
-
-                    raw_json = quiz_response.text.strip().replace("```json", "").replace("```", "")
-                    st.session_state.quiz_data = json.loads(raw_json)
-                    st.session_state.user_answers = {}
-                    st.session_state.quiz_checked = False
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error processing: {e}")
-
-    # Renders the metrics and modules inline
-    display_summary_and_quiz()
