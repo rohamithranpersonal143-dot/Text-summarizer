@@ -102,7 +102,7 @@ if "input_text" not in st.session_state:
 # pipeline control (IMPORTANT for multi-prompt system)
 if "processing_done" not in st.session_state:
     st.session_state.processing_done = False
-# ==========================================
+    # ==========================================
 # PROCESS BUTTON (MULTI-PROMPT PIPELINE)
 # ==========================================
 if st.button("🚀 Process Text"):
@@ -217,7 +217,7 @@ TEXT:
     st.session_state.processing_done = True
 
     st.rerun()
-# ==========================================
+    # ==========================================
 # INPUT AREA (TEXT ENTRY)
 # ==========================================
 st.title("📚 My Study Buddy")
@@ -342,3 +342,4 @@ if st.button("🚀 Process Text"):
     st.session_state.processing_done = False
 
     st.rerun()
+    
