@@ -7,338 +7,343 @@ import base64
 import pypdf
 
 # ==========================================
-# PAGE SETUP
+# APP CONFIG
 # ==========================================
 st.set_page_config(
-    page_title="My Study Buddy",
-    page_icon="📱",
+    page_title="AI Study System",
+    page_icon="📚",
     layout="centered"
 )
 
-# ==========================================
-# MODELS
-# ==========================================
 VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 TEXT_MODEL = "llama-3.3-70b-versatile"
+
 # ==========================================
-# SIDEBAR SETTINGS
+# SIDEBAR
 # ==========================================
 st.sidebar.title("⚙️ Settings")
 
-# API KEY (secrets OR manual input)
 if "GROQ_API_KEY" in st.secrets:
     api_key = st.secrets["GROQ_API_KEY"]
 else:
-    api_key = st.sidebar.text_input(
-        "🔑 Enter Groq API Key",
-        type="password"
-    )
+    api_key = st.sidebar.text_input("🔑 Groq API Key", type="password")
 
-# LANGUAGE
-selected_language = st.sidebar.selectbox(
-    "🌐 Output Language",
-    [
-        "English",
-        "Malay",
-        "Tamil",
-        "Spanish",
-        "French",
-        "German",
-        "Chinese",
-        "Japanese",
-        "Arabic"
-    ]
+language = st.sidebar.selectbox(
+    "🌐 Language",
+    ["English","Malay","Tamil","Spanish","French","German","Chinese","Japanese","Arabic"]
 )
 
-# DIFFICULTY
-difficulty_level = st.sidebar.selectbox(
-    "🎯 Difficulty Level",
-    [
-        "Kindergarten",
-        "Year 1",
-        "Year 2",
-        "Year 3",
-        "Year 4",
-        "Year 5",
-        "Year 6",
-        "Secondary (Basic)",
-        "Secondary (Advanced)"
-    ]
+difficulty = st.sidebar.selectbox(
+    "🎯 Difficulty",
+    ["Kindergarten","Year 1","Year 2","Year 3","Year 4","Year 5","Year 6","Secondary (Basic)","Secondary (Advanced)"]
 )
 
-st.sidebar.markdown("---")
-st.sidebar.caption("Multi-prompt AI system enabled")
-
-# ==========================================
-# API SAFETY CHECK
-# ==========================================
 if not api_key:
-    st.info("Please enter your Groq API key to continue.")
     st.stop()
 
 client = Groq(api_key=api_key)
+
 # ==========================================
-# SESSION STATE INITIALIZATION
+# SESSION STATE (CLEAN STRUCTURE)
+# ==========================================
+defaults = {
+    "summary": "",
+    "concepts": "",
+    "quiz": [],
+    "answers": {},
+    "scan_text": "",
+    "history": []
+}
+
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+# ==========================================
+# PART 2/5 — CORE FUNCTIONS
 # ==========================================
 
-if "summary" not in st.session_state:
-    st.session_state.summary = ""
+# ---------- Language + Difficulty Maps ----------
+LANGUAGES = {
+    "English": "English",
+    "Malay": "Malay",
+    "Chinese (Simplified)": "Simplified Chinese",
+    "Tamil": "Tamil"
+}
 
-if "concepts" not in st.session_state:
-    st.session_state.concepts = ""
+DIFFICULTY_LEVELS = {
+    "Kindergarten": "very easy, simple words",
+    "Primary": "easy, basic understanding",
+    "Year 6": "moderate difficulty, exam level",
+    "Secondary": "advanced school level",
+}
 
-if "quiz_data" not in st.session_state:
-    st.session_state.quiz_data = []
+# ---------- JSON Cleaner ----------
+def safe_json_loads(raw_text: str):
+    """
+    Safely parse JSON from model output.
+    Handles cases where extra text exists outside JSON.
+    """
+    try:
+        return json.loads(raw_text)
+    except:
+        try:
+            start = raw_text.find("{")
+            end = raw_text.rfind("}") + 1
+            return json.loads(raw_text[start:end])
+        except:
+            return None
 
-if "user_answers" not in st.session_state:
-    st.session_state.user_answers = {}
 
-if "quiz_checked" not in st.session_state:
-    st.session_state.quiz_checked = False
+# ---------- Prompt Builder ----------
+def build_prompt(text, task_type, language, difficulty):
+    return f"""
+You are an educational assistant.
 
-if "input_text" not in st.session_state:
-    st.session_state.input_text = ""
+Task: {task_type}
+Difficulty: {difficulty}
+Output Language: {language}
 
-# pipeline control (IMPORTANT for multi-prompt system)
-if "processing_done" not in st.session_state:
-    st.session_state.processing_done = False
-# ==========================================
-# PROCESS BUTTON (MULTI-PROMPT PIPELINE)
-# ==========================================
-if st.button("🚀 Process Text"):
-
-    if not st.session_state.input_text.strip():
-        st.warning("Please enter or upload text first.")
-        st.stop()
-
-    text = st.session_state.input_text
-
-    # RESET OLD DATA
-    st.session_state.summary = ""
-    st.session_state.concepts = ""
-    st.session_state.quiz_data = []
-
-    # ==========================================
-    # PROMPT 1 — SUMMARY (CLEAR + SIMPLE)
-    # ==========================================
-    summary_prompt = f"""
-Create a clear 5-bullet summary.
-
-Language: {selected_language}
-Difficulty: {difficulty_level}
-
-Focus on main ideas.
-
-TEXT:
+Input Text:
 {text}
-"""
-
-    summary_response = client.chat.completions.create(
-        model=TEXT_MODEL,
-        messages=[{"role": "user", "content": summary_prompt}]
-    )
-
-    st.session_state.summary = summary_response.choices[0].message.content
-
-
-    # ==========================================
-    # PROMPT 2 — CONCEPT UNDERSTANDING (IMPORTANT FIX)
-    # This solves your "doesn't understand examples" issue
-    # ==========================================
-    concept_prompt = f"""
-Extract key concepts and EXPLAIN examples from the text.
 
 Rules:
-- You MUST explain any example in simple words
-- Do NOT copy sentences
-- Break into short points
-- Make it easy for students
-
-Language: {selected_language}
-Difficulty: {difficulty_level}
-
-TEXT:
-{text}
+- Keep output clear and structured
+- Avoid unnecessary complexity
+- If summarizing, keep key points only
+- If generating quiz, include questions + answers clearly
 """
 
-    concept_response = client.chat.completions.create(
-        model=TEXT_MODEL,
-        messages=[{"role": "user", "content": concept_prompt}]
+
+# ---------- Groq API Call ----------
+def call_groq(client, prompt):
+    """
+    Sends request to Groq and returns raw response text.
+    """
+    response = client.chat.completions.create(
+        model="llama3-70b-8192",
+        messages=[
+            {"role": "system", "content": "You are a helpful education assistant."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.5
     )
 
-    st.session_state.concepts = concept_response.choices[0].message.content
+    return response.choices[0].message.content
+# ==========================================
+# PART 3/5 — STREAMLIT UI LAYOUT
+# ==========================================
+
+st.set_page_config(page_title="Study Buddy", layout="wide")
+
+st.title("📚 My Study Buddy")
+
+# ---------- SIDEBAR ----------
+st.sidebar.header("⚙️ Settings")
+
+task_type = st.sidebar.selectbox(
+    "Choose Task Type",
+    ["Summary", "Quiz", "Explain", "Flashcards"]
+)
+
+language = st.sidebar.selectbox(
+    "Output Language",
+    list(LANGUAGES.keys())
+)
+
+difficulty = st.sidebar.selectbox(
+    "Difficulty Level",
+    list(DIFFICULTY_LEVELS.keys())
+)
+
+input_mode = st.sidebar.radio(
+    "Input Mode",
+    ["Paste Text", "Upload PDF"]
+)
+
+st.sidebar.markdown("---")
+st.sidebar.info("Tip: Longer text = better summaries & quizzes")
+
+# ---------- MAIN INPUT AREA ----------
+text_input = ""
+
+if input_mode == "Paste Text":
+    text_input = st.text_area(
+        "Enter your text here",
+        height=300,
+        placeholder="Paste your notes, chapter, or article here..."
+    )
+
+elif input_mode == "Upload PDF":
+    uploaded_file = st.file_uploader("Upload PDF", type=["pdf"])
+
+    if uploaded_file is not None:
+        import PyPDF2
+
+        pdf_reader = PyPDF2.PdfReader(uploaded_file)
+        extracted_text = ""
+
+        for page in pdf_reader.pages:
+            extracted_text += page.extract_text() or ""
+
+        text_input = extracted_text
+
+        st.success("PDF loaded successfully!")
+
+# ---------- ACTION BUTTON ----------
+generate = st.button("🚀 Generate")
+# ==========================================
+# PART 4/5 — GENERATION LOGIC + OUTPUT
+# ==========================================
+
+if generate and text_input.strip():
+
+    # ---------- Convert selections ----------
+    selected_language = LANGUAGES[language]
+    selected_difficulty = DIFFICULTY_LEVELS[difficulty]
+
+    # ---------- Build prompt ----------
+    prompt = build_prompt(
+        text=text_input,
+        task_type=task_type,
+        language=selected_language,
+        difficulty=selected_difficulty
+    )
+
+    # ---------- Initialize Groq client ----------
+    client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+
+    # ---------- Call API ----------
+    with st.spinner("Generating response..."):
+        raw_output = call_groq(client, prompt)
+
+    # ---------- Display output ----------
+    st.subheader("📌 Result")
+
+    # ---------- Task-specific formatting ----------
+    if task_type == "Summary":
+        st.markdown("### 🧾 Summary")
+        st.write(raw_output)
+
+    elif task_type == "Explain":
+        st.markdown("### 📖 Explanation")
+        st.write(raw_output)
+
+    elif task_type == "Flashcards":
+        st.markdown("### 🧠 Flashcards")
+        st.write(raw_output)
+
+    elif task_type == "Quiz":
+        st.markdown("### ❓ Quiz")
+
+        parsed = safe_json_loads(raw_output)
+
+        if parsed and isinstance(parsed, dict):
+            questions = parsed.get("questions", [])
+
+            for i, q in enumerate(questions, 1):
+                st.markdown(f"**Q{i}: {q.get('question')}**")
+                st.markdown(f"Answer: {q.get('answer')}")
+                st.markdown("---")
+        else:
+            # fallback if model didn't return JSON
+            st.warning("Model did not return structured quiz format. Showing raw output:")
+            st.write(raw_output)
+
+else:
+    if generate:
+        st.error("Please enter or upload some text first.")
+# ==========================================
+# PART 5/5 — FINAL POLISH + EXPORT + FIXES
+# ==========================================
+
+# ---------- Improve PDF text cleanup ----------
+def clean_text(text):
+    """
+    Removes excessive whitespace and fixes broken extraction issues.
+    """
+    if not text:
+        return ""
+    return " ".join(text.split())
 
 
-    # ==========================================
-    # PROMPT 3 — QUIZ GENERATION (STRICT JSON)
-    # ==========================================
-    quiz_prompt = f"""
-You are an exam question generator.
+# ---------- Better JSON enforcement prompt (upgrade for quizzes) ----------
+def build_quiz_prompt(text, language, difficulty):
+    return f"""
+You are a strict quiz generator.
 
-Create 10 MCQs ONLY.
+Create a multiple-choice quiz ONLY in valid JSON format.
 
 Rules:
-- Must test understanding of concepts AND examples
-- No copying sentences
-- No summary
-- Must be valid JSON only
-
-Language: {selected_language}
-Difficulty: {difficulty_level}
-
-FORMAT:
+- Output MUST be valid JSON only (no explanations, no markdown)
+- Structure must be:
 {{
   "questions": [
     {{
       "question": "...",
-      "options": ["A","B","C","D"],
-      "correct_index": 0
+      "options": ["A", "B", "C", "D"],
+      "answer": "..."
     }}
   ]
 }}
 
-TEXT:
+Task:
+Generate a quiz based on the text below.
+
+Difficulty: {difficulty}
+Language: {language}
+
+Text:
 {text}
 """
 
-    quiz_response = client.chat.completions.create(
-        model=TEXT_MODEL,
-        messages=[{"role": "user", "content": quiz_prompt}],
-        response_format={"type": "json_object"}
-    )
 
-    parsed = json.loads(quiz_response.choices[0].message.content)
-    st.session_state.quiz_data = parsed["questions"]
+# ---------- Override prompt for quiz ----------
+if generate and text_input.strip():
 
-    # RESET QUIZ STATE
-    st.session_state.user_answers = {}
-    st.session_state.quiz_checked = False
+    selected_language = LANGUAGES[language]
+    selected_difficulty = DIFFICULTY_LEVELS[difficulty]
 
-    st.session_state.processing_done = True
+    client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
-    st.rerun()
-# ==========================================
-# INPUT AREA (TEXT ENTRY)
-# ==========================================
-st.title("📚 My Study Buddy")
+    with st.spinner("Generating response..."):
 
-input_mode = st.radio("Input Mode", ["Paste Text", "Upload PDF"])
-
-text_input = ""
-
-# --------------------------
-# PASTE TEXT
-# --------------------------
-if input_mode == "Paste Text":
-    text_input = st.text_area("Enter your text here", height=200)
-
-# --------------------------
-# PDF INPUT
-# --------------------------
-else:
-    file = st.file_uploader("Upload PDF", type=["pdf"])
-
-    if file:
-        reader = pypdf.PdfReader(file)
-        text_input = "\n".join([page.extract_text() or "" for page in reader.pages])
-
-# store globally for pipeline
-st.session_state.input_text = text_input
-
-
-# ==========================================
-# DISPLAY RESULTS
-# ==========================================
-if st.session_state.processing_done:
-
-    # --------------------------
-    # SUMMARY
-    # --------------------------
-    if st.session_state.summary:
-        st.divider()
-        st.header("📝 Summary")
-        st.write(st.session_state.summary)
-
-    # --------------------------
-    # CONCEPTS (IMPORTANT FIX FOR EXAMPLES)
-    # --------------------------
-    if st.session_state.concepts:
-        st.divider()
-        st.header("🧠 Key Concepts (Explained Simply)")
-        st.write(st.session_state.concepts)
-
-    # --------------------------
-    # QUIZ SECTION
-    # --------------------------
-    if st.session_state.quiz_data:
-
-        st.divider()
-        st.header("🧠 Quiz")
-
-        for i, q in enumerate(st.session_state.quiz_data):
-
-            st.subheader(f"Q{i+1}: {q['question']}")
-
-            options = q["options"]
-
-            saved = st.session_state.user_answers.get(f"q_{i}")
-            index = options.index(saved) if saved in options else 0
-
-            chosen = st.radio(
-                "Choose answer:",
-                options,
-                key=f"q_{i}",
-                index=index
+        # Use strict quiz prompt if needed
+        if task_type == "Quiz":
+            prompt = build_quiz_prompt(
+                text=text_input,
+                language=selected_language,
+                difficulty=selected_difficulty
+            )
+        else:
+            prompt = build_prompt(
+                text=text_input,
+                task_type=task_type,
+                language=selected_language,
+                difficulty=selected_difficulty
             )
 
-            st.session_state.user_answers[f"q_{i}"] = chosen
+        raw_output = call_groq(client, prompt)
 
-            # show results after grading
-            if st.session_state.quiz_checked:
-                correct = options[q["correct_index"]]
+    st.subheader("📌 Result")
 
-                if chosen == correct:
-                    st.success("✅ Correct")
-                else:
-                    st.error(f"❌ Correct answer: {correct}")
-
-            st.write("---")
-
-        # --------------------------
-        # GRADE BUTTON
-        # --------------------------
-        if not st.session_state.quiz_checked:
-
-            if st.button("📊 Grade Quiz"):
-                st.session_state.quiz_checked = True
-                st.rerun()
-
-        else:
-
-            score = 0
-
-            for i, q in enumerate(st.session_state.quiz_data):
-                if st.session_state.user_answers.get(f"q_{i}") == q["options"][q["correct_index"]]:
-                    score += 1
-
-            st.success(f"🎯 Score: {score}/{len(st.session_state.quiz_data)}")
-
-            if st.button("🔄 Reset Quiz"):
-                st.session_state.user_answers = {}
-                st.session_state.quiz_checked = False
-                st.rerun()
+    st.write(raw_output)
 
 
-# ==========================================
-# RUN PIPELINE BUTTON
-# ==========================================
-if st.button("🚀 Process Text"):
+    # ---------- Download feature ----------
+    st.markdown("---")
+    st.subheader("⬇️ Download Result")
 
-    if not st.session_state.input_text.strip():
-        st.warning("No text provided.")
-        st.stop()
+    file_name = f"{task_type}_output.txt"
 
-    # trigger multi-prompt pipeline
-    st.session_state.processing_done = False
+    st.download_button(
+        label="Download as TXT",
+        data=raw_output,
+        file_name=file_name,
+        mime="text/plain"
+    )
 
-    st.rerun()
+
+# ---------- Extra UX improvement ----------
+st.markdown("---")
+st.caption("Study Buddy • AI-powered learning assistant")
+
