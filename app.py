@@ -49,14 +49,11 @@ if not api_key:
 client = Groq(api_key=api_key)
 
 # =====================================================
-# SESSION STATE (CLEAN SEPARATION)
+# SESSION STATE
 # =====================================================
-
-# Scanner
 st.session_state.setdefault("scan_text", "")
 st.session_state.setdefault("camera_on", False)
 
-# Study system
 st.session_state.setdefault("study_summary", "")
 st.session_state.setdefault("study_quiz", [])
 st.session_state.setdefault("study_answers", {})
@@ -110,50 +107,64 @@ if st.session_state.scan_text:
 
     if st.button("🧠 Generate Quiz from Scan"):
 
-        prompt = f"""
-Language: {language}
-Difficulty: {difficulty}
+        quiz_prompt = f"""
+You are an exam generator.
 
-Create:
-1. 5 bullet summary
-2. 10 MCQs JSON format
+RULES:
+- Generate EXACTLY 10 questions
+- JSON ONLY
+- No explanations
 
-Return format:
-SUMMARY:
-...
-QUIZ:
-[{{"question":"","options":["A","B","C","D"],"correct_index":0}}]
+Format:
+{{
+  "questions": [
+    {{
+      "question": "string",
+      "options": ["A","B","C","D"],
+      "correct_index": 0
+    }}
+  ]
+}}
 
 TEXT:
 {st.session_state.scan_text}
 """
 
-        res = client.chat.completions.create(
+        summary_prompt = f"""
+You are a strict extractor.
+
+Rules:
+- No interpretation
+- No philosophy
+- No emotion
+- Only factual bullets
+- Exactly 5 bullets
+
+TEXT:
+{st.session_state.scan_text}
+"""
+
+        summary_res = client.chat.completions.create(
             model=TEXT_MODEL,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": summary_prompt}]
         )
 
-        raw = res.choices[0].message.content
+        quiz_res = client.chat.completions.create(
+            model=TEXT_MODEL,
+            messages=[{"role": "user", "content": quiz_prompt}],
+            response_format={"type": "json_object"}
+        )
 
-        # safer parsing
-        try:
-            start = raw.find("[")
-            end = raw.rfind("]") + 1
+        st.session_state.study_summary = summary_res.choices[0].message.content
+        st.session_state.study_quiz = json.loads(quiz_res.choices[0].message.content)
 
-            st.session_state.study_quiz = json.loads(raw[start:end])
-            st.session_state.study_summary = raw[:start].strip()
+        st.session_state.study_answers = {}
+        st.session_state.study_checked = False
 
-            st.session_state.study_answers = {}
-            st.session_state.study_checked = False
-
-            st.rerun()
-
-        except Exception as e:
-            st.error("Failed to parse quiz. Try again.")
-            st.write(raw)
+        st.rerun()
 
 # =====================================================
-# PDF / TEXT INPUT SYSTEM
+# PDF / TEXT INPUT
 # =====================================================
 st.divider()
 st.title("📚 Study Buddy")
@@ -167,13 +178,12 @@ if mode == "Paste Text":
 
 else:
     file = st.file_uploader("Upload PDF", type=["pdf"])
-
     if file:
         reader = pypdf.PdfReader(file)
         text = "\n".join(page.extract_text() or "" for page in reader.pages)
 
 # =====================================================
-# PROCESS BUTTON
+# PROCESS TEXT
 # =====================================================
 if st.button("Process Text"):
 
@@ -182,21 +192,31 @@ if st.button("Process Text"):
         st.stop()
 
     summary_prompt = f"""
-Summarize into 5 bullet points.
-Language: {language}
-Difficulty: {difficulty}
+You are a strict extractor.
+
+Rules:
+- Only facts from text
+- No interpretation
+- No philosophy
+- No storytelling
+- Exactly 5 bullet points
 
 TEXT:
 {text}
 """
 
     quiz_prompt = f"""
-Return ONLY JSON:
+You are an exam generator.
 
+RULES:
+- Generate EXACTLY 10 MCQs
+- JSON ONLY
+
+Format:
 {{
   "questions": [
     {{
-      "question": "...",
+      "question": "string",
       "options": ["A","B","C","D"],
       "correct_index": 0
     }}
@@ -219,9 +239,7 @@ TEXT:
     )
 
     st.session_state.study_summary = summary_res.choices[0].message.content
-
-    parsed = json.loads(quiz_res.choices[0].message.content)
-    st.session_state.study_quiz = parsed.get("questions", [])
+    st.session_state.study_quiz = json.loads(quiz_res.choices[0].message.content)
 
     st.session_state.study_answers = {}
     st.session_state.study_checked = False
@@ -229,7 +247,7 @@ TEXT:
     st.rerun()
 
 # =====================================================
-# QUIZ RENDER (SINGLE SOURCE OF TRUTH)
+# QUIZ DISPLAY
 # =====================================================
 if st.session_state.study_summary:
     st.subheader("📝 Summary")
@@ -239,14 +257,14 @@ if st.session_state.study_quiz:
 
     st.subheader("🧠 Quiz")
 
-    for i, q in enumerate(st.session_state.study_quiz):
+    for i, q in enumerate(st.session_state.study_quiz["questions"]):
 
         st.write(q["question"])
 
         answer = st.radio(
             "Select answer",
             q["options"],
-            key=f"quiz_{i}"
+            key=f"q_{i}"
         )
 
         st.session_state.study_answers[f"q_{i}"] = answer
