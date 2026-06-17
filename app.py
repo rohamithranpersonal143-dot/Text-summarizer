@@ -3,6 +3,7 @@ from groq import Groq
 import json
 from PIL import Image
 import io
+import base64
 
 # Mobile Layout Setup
 st.set_page_config(page_title="My Study Buddy", page_icon="📱", layout="centered")
@@ -115,10 +116,10 @@ if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
                 try:
                     img = Image.open(img_file)
                     
-                    # Convert PIL Image to bytes for Groq API processing
+                    # Convert PIL Image to base64 bytes for Groq Vision API
                     img_byte_arr = io.BytesIO()
                     img.save(img_byte_arr, format='JPEG')
-                    img_bytes = img_byte_arr.getvalue()
+                    base64_image = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
 
                     prompt = "Look at this image. Extract every piece of text visible in it. Format it cleanly exactly as it appears. Do not summarize or add chat text, just give the text."
                     
@@ -132,14 +133,14 @@ if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
                                     {
                                         "type": "image_url",
                                         "image_url": {
-                                            "url": f"data:image/jpeg;base64,{img_bytes.hex()}"
+                                            "url": f"data:image/jpeg;base64,{base64_image}"
                                         }
                                     }
                                 ]
                             }
                         ]
                     )
-                    st.session_state.scanned_text = response.choices[0].message.content
+                    st.session_state.scanned_text = response.choices.message.content
                 except Exception as e:
                     st.error(f"Failed to scan text: {e}")
 
@@ -163,7 +164,7 @@ if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
                         model=MODEL_NAME,
                         messages=[{"role": "user", "content": master_prompt}]
                     )
-                    raw_output = response.choices[0].message.content
+                    raw_output = response.choices.message.content
                     
                     if "===SPLIT_HERE===" in raw_output:
                         summary_part, quiz_part = raw_output.split("===SPLIT_HERE===", 1)
@@ -218,3 +219,4 @@ else:
 
     if st.button("🚀 Process Material", use_container_width=True):
         if not lecture_text.strip():
+           st.warning("Please provide text or a PDF file first!")else:with st.spinner(f"🧠 AI is building your study kit in {selected_language}..."):try:sum_response = client.chat.completions.create(model=MODEL_NAME,messages=[{"role": "user", "content": f"Provide a summary of exactly 5 critical bullet points. The entire summary must be written in the following language: {selected_language}:\n\n{lecture_text}"}])st.session_state.summary = sum_response.choices.message.contentquiz_prompt = f"Generate a JSON object containing a valid JSON array matching the key 'questions' consisting of exactly 10 multiple-choice questions based on the text context provided. Each nested object contains keys: 'question', 'options' (array of 4 strings), and 'correct_index' (integer 0-3). The text structure must be strictly in the following language: {selected_language}.\n\n{lecture_text}"# Force strict JSON formatting via Groq parameters directlyquiz_response = client.chat.completions.create(model=MODEL_NAME,messages=[{"role": "user", "content": quiz_prompt}],response_format={"type": "json_object"})raw_json = quiz_response.choices.message.content.strip()# Process top-level structural encapsulation rules required by groq dynamic profiles safelyparsed_data = json.loads(raw_json)if isinstance(parsed_data, dict) and "questions" in parsed_data:st.session_state.quiz_data = parsed_data["questions"]elif isinstance(parsed_data, dict) and len(parsed_data.keys()) == 1:st.session_state.quiz_data = list(parsed_data.values())[0]else:st.session_state.quiz_data = parsed_datast.session_state.user_answers = {}st.session_state.quiz_checked = Falsest.rerun()except Exception as e:st.error(f"Error processing: {e}")# Renders the metrics and modules inlinedisplay_summary_and_quiz(){content: }
