@@ -26,58 +26,51 @@ else:
     )
 
 # ==========================================
-# LANGUAGE SELECTOR
+# SIDEBAR CONTROLS
 # ==========================================
 selected_language = st.sidebar.selectbox(
     "🌐 Choose Output Language:",
+    ["English", "Spanish", "French", "German", "Chinese", "Malay", "Japanese", "Arabic"]
+)
+
+difficulty_level = st.sidebar.selectbox(
+    "🎯 Choose Difficulty Level:",
     [
-        "English",
-        "Spanish",
-        "French",
-        "German",
-        "Chinese",
-        "Malay",
-        "Japanese",
-        "Arabic"
+        "Kindergarten",
+        "Year 1",
+        "Year 2",
+        "Year 3",
+        "Year 4",
+        "Year 5",
+        "Year 6",
+        "Secondary (Basic)",
+        "Secondary (Advanced)"
     ]
 )
 
 if not api_key:
-    st.info(
-        "💡 Please add your Groq API Key in the sidebar or Streamlit Secrets to begin."
-    )
+    st.info("Add your Groq API key to continue.")
     st.stop()
 
-# ==========================================
-# GROQ CLIENT
-# ==========================================
 client = Groq(api_key=api_key)
 
 VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 TEXT_MODEL = "llama-3.3-70b-versatile"
-
 # ==========================================
 # SESSION STATE
 # ==========================================
-if "summary" not in st.session_state:
-    st.session_state.summary = ""
+for key in ["summary", "quiz_data", "user_answers", "quiz_checked", "scanned_text", "camera_on"]:
+    if key not in st.session_state:
+        if key == "quiz_data":
+            st.session_state[key] = []
+        elif key == "user_answers":
+            st.session_state[key] = {}
+        else:
+            st.session_state[key] = "" if key != "quiz_checked" else False
 
-if "quiz_data" not in st.session_state:
-    st.session_state.quiz_data = []
 
-if "user_answers" not in st.session_state:
-    st.session_state.user_answers = {}
-
-if "quiz_checked" not in st.session_state:
-    st.session_state.quiz_checked = False
-
-if "scanned_text" not in st.session_state:
-    st.session_state.scanned_text = ""
-
-if "camera_on" not in st.session_state:
-    st.session_state.camera_on = False
 # ==========================================
-# DISPLAY SUMMARY + QUIZ
+# DISPLAY FUNCTION
 # ==========================================
 def display_summary_and_quiz():
 
@@ -93,610 +86,236 @@ def display_summary_and_quiz():
 
         for q_idx, q_item in enumerate(st.session_state.quiz_data):
 
-            st.subheader(
-                f"Q{q_idx + 1}: {q_item['question']}"
-            )
+            st.subheader(f"Q{q_idx+1}: {q_item['question']}")
 
-            saved_answer = st.session_state.user_answers.get(
-                f"q_{q_idx}"
-            )
+            saved = st.session_state.user_answers.get(f"q_{q_idx}")
+            options = q_item["options"]
 
-            if (
-                saved_answer
-                and saved_answer in q_item["options"]
-            ):
-                radio_index = q_item["options"].index(
-                    saved_answer
-                )
-            else:
-                radio_index = 0
+            index = options.index(saved) if saved in options else 0
 
-            chosen_option = st.radio(
+            chosen = st.radio(
                 "Select answer:",
-                q_item["options"],
+                options,
                 key=f"q_{q_idx}",
-                index=radio_index
+                index=index
             )
 
-            st.session_state.user_answers[
-                f"q_{q_idx}"
-            ] = chosen_option
+            st.session_state.user_answers[f"q_{q_idx}"] = chosen
 
             if st.session_state.quiz_checked:
-
-                correct_answer = q_item["options"][
-                    q_item["correct_index"]
-                ]
-
-                if chosen_option == correct_answer:
-                    st.success("✅ Correct!")
+                correct = options[q_item["correct_index"]]
+                if chosen == correct:
+                    st.success("✅ Correct")
                 else:
-                    st.error(
-                        f"❌ Incorrect. Correct answer: {correct_answer}"
-                    )
+                    st.error(f"❌ Correct answer: {correct}")
 
             st.write("---")
 
         if not st.session_state.quiz_checked:
 
-            if st.button(
-                "📊 Grade My Quiz",
-                use_container_width=True
-            ):
+            if st.button("📊 Grade My Quiz"):
                 st.session_state.quiz_checked = True
                 st.rerun()
 
         else:
 
             score = 0
-
-            for i, q in enumerate(
-                st.session_state.quiz_data
-            ):
-
-                selected = st.session_state.user_answers.get(
-                    f"q_{i}"
-                )
-
-                correct = q["options"][
-                    q["correct_index"]
-                ]
-
-                if selected == correct:
+            for i, q in enumerate(st.session_state.quiz_data):
+                if st.session_state.user_answers.get(f"q_{i}") == q["options"][q["correct_index"]]:
                     score += 1
 
-            st.success(
-                f"🎯 Score: {score}/{len(st.session_state.quiz_data)}"
-            )
+            st.success(f"🎯 Score: {score}/{len(st.session_state.quiz_data)}")
 
-            if st.button(
-                "🔄 Reset Quiz",
-                use_container_width=True
-            ):
+            if st.button("🔄 Reset Quiz"):
                 st.session_state.user_answers = {}
                 st.session_state.quiz_checked = False
                 st.rerun()
-
-
 # ==========================================
 # NAVIGATION
 # ==========================================
 app_mode = st.selectbox(
     "🗺️ Choose Feature:",
     [
-        "📷 1. Text Scanner (Google Lens Mode)",
-        "📚 2. Text/PDF Summarizer & Quizzer"
+        "📷 Text Scanner (Google Lens Mode)",
+        "📚 Summarizer & Quizzer"
     ]
 )
+
 # ==========================================
-# FEATURE 1: CAMERA TEXT SCANNER
+# FEATURE 1
 # ==========================================
-if app_mode == "📷 1. Text Scanner (Google Lens Mode)":
+if app_mode == "📷 Text Scanner (Google Lens Mode)":
 
     st.title("📷 Mobile Text Scanner")
-    st.write(
-        "Snap a photo of a book, paper, or screen to instantly extract and copy the text."
-    )
 
     if st.session_state.camera_on:
-
-        if st.button(
-            "🔴 Turn Camera OFF",
-            use_container_width=True
-        ):
+        if st.button("🔴 Turn Camera OFF"):
             st.session_state.camera_on = False
             st.rerun()
-
     else:
-
-        if st.button(
-            "📷 Turn Camera ON",
-            use_container_width=True
-        ):
+        if st.button("📷 Turn Camera ON"):
             st.session_state.camera_on = True
             st.rerun()
 
-    # =============================
-    # CAMERA INPUT
-    # =============================
     if st.session_state.camera_on:
 
-        img_file = st.camera_input(
-            "Position your text clearly in the frame:"
-        )
+        img_file = st.camera_input("Capture text")
 
-        if img_file is not None:
+        if img_file:
 
-            with st.spinner(
-                "🔍 AI is reading the text..."
-            ):
+            with st.spinner("Reading text..."):
 
-                try:
+                img = Image.open(img_file)
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG")
 
-                    img = Image.open(img_file)
+                b64 = base64.b64encode(buf.getvalue()).decode()
 
-                    img_byte_arr = io.BytesIO()
-                    img.save(
-                        img_byte_arr,
-                        format="JPEG"
-                    )
+                prompt = "Extract all text exactly. No explanation."
 
-                    base64_image = base64.b64encode(
-                        img_byte_arr.getvalue()
-                    ).decode("utf-8")
+                response = client.chat.completions.create(
+                    model=VISION_MODEL,
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
+                        ]
+                    }],
+                    temperature=0
+                )
 
-                    prompt = """
-Extract ALL visible text from this image.
+                st.session_state.scanned_text = response.choices[0].message.content
+if st.session_state.scanned_text:
 
-Requirements:
-- Preserve formatting where possible
-- Do NOT summarize
-- Do NOT explain
-- Return only the extracted text
-"""
+        st.success("Text extracted")
+        st.code(st.session_state.scanned_text)
 
-                    response = client.chat.completions.create(
-                        model=VISION_MODEL,
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": prompt
-                                    },
-                                    {
-                                        "type": "image_url",
-                                        "image_url": {
-                                            "url": f"data:image/jpeg;base64,{base64_image}"
-                                        }
-                                    }
-                                ]
-                            }
-                        ],
-                        temperature=0
-                    )
-
-                    st.session_state.scanned_text = (
-                        response.choices[0].message.content
-                    )
-
-                except Exception as e:
-
-                    st.error(
-                        f"Failed to scan text: {e}"
-                    )
-
-    # =============================
-    # DISPLAY OCR RESULT
-    # =============================
-    if st.session_state.scanned_text:
-
-        st.success("✨ Text Extracted!")
-
-        st.code(
-            st.session_state.scanned_text,
-            language="text"
-        )
-
-        if st.button(
-            "🧠 Send to Summarizer & Quizzer",
-            use_container_width=True
-        ):
+        if st.button("Send to Quiz Generator"):
 
             st.session_state.summary = ""
             st.session_state.quiz_data = []
 
-            with st.spinner(
-                f"Building study materials in {selected_language}..."
-            ):
+            master_prompt = f"""
+Analyze the text.
 
-                try:
+Language: {selected_language}
+Difficulty: {difficulty_level}
 
-                    master_prompt = f"""
-Analyze the source text below.
+Rules:
+- Adjust vocabulary and reasoning level to difficulty
+- Kindergarten: very simple facts
+- Year 1–3: basic comprehension
+- Year 4–6: inference questions
+- Secondary: analytical reasoning
 
-OUTPUT 1:
-Create EXACTLY 5 bullet points.
+OUTPUT 1: 5 bullet summary
 
-Language:
-{selected_language}
-
-OUTPUT 2:
-Generate EXACTLY 10 multiple choice questions.
-
-Return OUTPUT 2 as a STRICT JSON ARRAY.
-
-Example:
-
+OUTPUT 2: 10 MCQs in JSON:
 [
   {{
-    "question": "Question",
-    "options": [
-      "Option A",
-      "Option B",
-      "Option C",
-      "Option D"
-    ],
+    "question": "...",
+    "options": ["A","B","C","D"],
     "correct_index": 0
   }}
 ]
 
-Separate OUTPUT 1 and OUTPUT 2 using:
-
 ===SPLIT_HERE===
 
-SOURCE TEXT:
+TEXT:
 {st.session_state.scanned_text}
 """
 
-                    response = client.chat.completions.create(
-                        model=TEXT_MODEL,
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": master_prompt
-                            }
-                        ]
-                    )
+            response = client.chat.completions.create(
+                model=TEXT_MODEL,
+                messages=[{"role": "user", "content": master_prompt}]
+            )
 
-                    raw_output = (
-                        response.choices[0]
-                        .message.content
-                    )
+            raw = response.choices[0].message.content
 
-                    if "===SPLIT_HERE===" in raw_output:
+            if "===SPLIT_HERE===" in raw:
 
-                        summary_part, quiz_part = (
-                            raw_output.split(
-                                "===SPLIT_HERE===",
-                                1
-                            )
-                        )
+                summary, quiz = raw.split("===SPLIT_HERE===")
 
-                        st.session_state.summary = (
-                            summary_part.strip()
-                        )
+                st.session_state.summary = summary.strip()
 
-                        start_idx = quiz_part.find("[")
-                        end_idx = (
-                            quiz_part.rfind("]")
-                            + 1
-                        )
+                start = quiz.find("[")
+                end = quiz.rfind("]") + 1
 
-                        if (
-                            start_idx != -1
-                            and end_idx > 0
-                        ):
+                st.session_state.quiz_data = json.loads(quiz[start:end])
 
-                            clean_json = (
-                                quiz_part[
-                                    start_idx:end_idx
-                                ]
-                            )
+            st.session_state.user_answers = {}
+            st.session_state.quiz_checked = False
 
-                            st.session_state.quiz_data = (
-                                json.loads(
-                                    clean_json
-                                )
-                            )
-
-                        else:
-
-                            quiz_part = (
-                                quiz_part
-                                .replace(
-                                    "```json",
-                                    ""
-                                )
-                                .replace(
-                                    "```",
-                                    ""
-                                )
-                                .strip()
-                            )
-
-                            st.session_state.quiz_data = (
-                                json.loads(
-                                    quiz_part
-                                )
-                            )
-
-                    else:
-
-                        st.session_state.summary = (
-                            raw_output
-                        )
-
-                        st.warning(
-                            "Quiz section could not be parsed."
-                        )
-
-                    st.session_state.user_answers = {}
-                    st.session_state.quiz_checked = False
-
-                    st.toast(
-                        "✅ Study kit generated!"
-                    )
-
-                    st.rerun()
-
-                except Exception as e:
-
-                    st.error(
-                        f"Processing failed: {e}"
-                    )
+            st.rerun()
 
         display_summary_and_quiz()
-# ==========================================
-# FEATURE 2: SUMMARIZER & QUIZZER
-# ==========================================
 else:
 
     st.title("📚 My Study Buddy")
-    st.write(
-        "Upload a file or paste text to generate summaries and quizzes."
-    )
 
-    input_type = st.radio(
-        "Choose Input Type:",
-        [
-            "📋 Paste Text",
-            "📄 Upload PDF"
-        ]
-    )
+    input_type = st.radio("Input Type", ["Paste Text", "Upload PDF"])
 
-    lecture_text = ""
+    text = ""
 
-    # =============================
-    # PASTE TEXT
-    # =============================
-    if input_type == "📋 Paste Text":
+    if input_type == "Paste Text":
+        text = st.text_area("Paste here", height=200)
 
-        lecture_text = st.text_area(
-            "Paste material here:",
-            height=200
-        )
-
-    # =============================
-    # PDF UPLOAD
-    # =============================
     else:
+        file = st.file_uploader("Upload PDF", type=["pdf"])
 
-        uploaded_file = st.file_uploader(
-            "Upload PDF",
-            type=["pdf"]
+        if file:
+            import pypdf
+            reader = pypdf.PdfReader(file)
+            text = "\n".join([p.extract_text() or "" for p in reader.pages])
+
+    if st.button("Process"):
+
+        if not text.strip():
+            st.warning("No text")
+            st.stop()
+
+        summary_prompt = f"""
+Create 5 bullet points.
+
+Language: {selected_language}
+Difficulty: {difficulty_level}
+
+TEXT:
+{text}
+"""
+
+        quiz_prompt = f"""
+Return JSON only.
+
+Language: {selected_language}
+Difficulty: {difficulty_level}
+
+Generate 10 MCQs adapted to difficulty.
+
+TEXT:
+{text}
+"""
+
+        summary = client.chat.completions.create(
+            model=TEXT_MODEL,
+            messages=[{"role": "user", "content": summary_prompt}]
         )
 
-        if uploaded_file is not None:
+        quiz = client.chat.completions.create(
+            model=TEXT_MODEL,
+            messages=[{"role": "user", "content": quiz_prompt}],
+            response_format={"type": "json_object"}
+        )
 
-            try:
+        st.session_state.summary = summary.choices[0].message.content
+        parsed = json.loads(quiz.choices[0].message.content)
 
-                import pypdf
+        st.session_state.quiz_data = parsed.get("questions", parsed)
 
-                pdf_reader = pypdf.PdfReader(
-                    uploaded_file
-                )
+        st.session_state.user_answers = {}
+        st.session_state.quiz_checked = False
 
-                pages = []
+        st.rerun()
 
-                for page in pdf_reader.pages:
-
-                    text = page.extract_text()
-
-                    if text:
-                        pages.append(text)
-
-                lecture_text = "\n".join(
-                    pages
-                )
-
-                st.success(
-                    f"Loaded {len(pdf_reader.pages)} pages."
-                )
-
-            except Exception as e:
-
-                st.error(
-                    f"Failed to read PDF: {e}"
-                )
-
-    # =============================
-    # PROCESS BUTTON
-    # =============================
-    if st.button(
-        "🚀 Process Material",
-        use_container_width=True
-    ):
-
-        if not lecture_text.strip():
-
-            st.warning(
-                "Please paste some text or upload a PDF."
-            )
-
-        else:
-
-            with st.spinner(
-                f"🧠 Building your study kit in {selected_language}..."
-            ):
-
-                try:
-
-                    # =============================
-                    # SUMMARY
-                    # =============================
-                    summary_prompt = f"""
-Create EXACTLY 5 important bullet points.
-
-Language:
-{selected_language}
-
-TEXT:
-{lecture_text}
-"""
-
-                    summary_response = (
-                        client.chat.completions.create(
-                            model=TEXT_MODEL,
-                            messages=[
-                                {
-                                    "role": "user",
-                                    "content": summary_prompt
-                                }
-                            ]
-                        )
-                    )
-
-                    st.session_state.summary = (
-                        summary_response
-                        .choices[0]
-                        .message.content
-                    )
-
-                    # =============================
-                    # QUIZ
-                    # =============================
-                    quiz_prompt = f"""
-Return ONLY valid JSON.
-
-Format:
-
-{{
-  "questions": [
-    {{
-      "question": "Question text",
-      "options": [
-        "Option A",
-        "Option B",
-        "Option C",
-        "Option D"
-      ],
-      "correct_index": 0
-    }}
-  ]
-}}
-
-Requirements:
-- Exactly 10 questions
-- Exactly 4 options per question
-- correct_index must be between 0 and 3
-- Language: {selected_language}
-
-TEXT:
-{lecture_text}
-"""
-
-                    quiz_response = (
-                        client.chat.completions.create(
-                            model=TEXT_MODEL,
-                            messages=[
-                                {
-                                    "role": "user",
-                                    "content": quiz_prompt
-                                }
-                            ],
-                            response_format={
-                                "type": "json_object"
-                            }
-                        )
-                    )
-
-                    raw_json = (
-                        quiz_response
-                        .choices[0]
-                        .message.content
-                        .strip()
-                    )
-
-                    raw_json = (
-                        raw_json
-                        .replace("```json", "")
-                        .replace("```", "")
-                        .strip()
-                    )
-
-                    try:
-
-                        parsed_data = json.loads(
-                            raw_json
-                        )
-
-                    except json.JSONDecodeError:
-
-                        st.error(
-                            "AI returned invalid JSON."
-                        )
-
-                        st.code(
-                            raw_json,
-                            language="json"
-                        )
-
-                        st.stop()
-
-                    if (
-                        isinstance(parsed_data, dict)
-                        and "questions" in parsed_data
-                    ):
-
-                        st.session_state.quiz_data = (
-                            parsed_data["questions"]
-                        )
-
-                    elif (
-                        isinstance(parsed_data, dict)
-                        and len(parsed_data.keys()) == 1
-                    ):
-
-                        st.session_state.quiz_data = (
-                            list(
-                                parsed_data.values()
-                            )[0]
-                        )
-
-                    else:
-
-                        st.session_state.quiz_data = (
-                            parsed_data
-                        )
-
-                    st.session_state.user_answers = {}
-                    st.session_state.quiz_checked = False
-
-                    st.toast(
-                        "✅ Study kit generated!"
-                    )
-
-                    st.rerun()
-
-                except Exception as e:
-
-                    st.error(
-                        f"Error processing: {e}"
-                    )
-
-    # =============================
-    # DISPLAY RESULTS
-    # =============================
     display_summary_and_quiz()
