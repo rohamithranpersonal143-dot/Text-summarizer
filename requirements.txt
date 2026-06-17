@@ -1,4 +1,5 @@
 streamlit
-google-genai
+groq
 pypdf
-pillow
+Pillow
+pybase64
