@@ -53,7 +53,7 @@ if not api_key:
 # ==========================================
 client = Groq(api_key=api_key)
 
-VISION_MODEL = "llama-3.2-11b-vision-preview"
+VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 TEXT_MODEL = "llama-3.3-70b-versatile"
 
 # ==========================================
@@ -76,8 +76,6 @@ if "scanned_text" not in st.session_state:
 
 if "camera_on" not in st.session_state:
     st.session_state.camera_on = False
-
-
 # ==========================================
 # DISPLAY SUMMARY + QUIZ
 # ==========================================
@@ -270,27 +268,27 @@ Requirements:
                                     {
                                         "type": "image_url",
                                         "image_url": {
-                                            "url":
-                                            f"data:image/jpeg;base64,{base64_image}"
+                                            "url": f"data:image/jpeg;base64,{base64_image}"
                                         }
                                     }
                                 ]
                             }
-                        ]
+                        ],
+                        temperature=0
                     )
 
                     st.session_state.scanned_text = (
-                        response.choices[0]
-                        .message.content
+                        response.choices[0].message.content
                     )
 
                 except Exception as e:
+
                     st.error(
                         f"Failed to scan text: {e}"
                     )
 
     # =============================
-    # DISPLAY EXTRACTED TEXT
+    # DISPLAY OCR RESULT
     # =============================
     if st.session_state.scanned_text:
 
@@ -319,30 +317,32 @@ Requirements:
 Analyze the source text below.
 
 OUTPUT 1:
-Create exactly 5 bullet points.
-Language: {selected_language}
+Create EXACTLY 5 bullet points.
+
+Language:
+{selected_language}
 
 OUTPUT 2:
-Generate exactly 10 multiple-choice questions.
+Generate EXACTLY 10 multiple choice questions.
 
-Return OUTPUT 2 as STRICT JSON ARRAY.
+Return OUTPUT 2 as a STRICT JSON ARRAY.
 
 Example:
 
 [
   {{
-    "question": "...",
+    "question": "Question",
     "options": [
-      "A",
-      "B",
-      "C",
-      "D"
+      "Option A",
+      "Option B",
+      "Option C",
+      "Option D"
     ],
     "correct_index": 0
   }}
 ]
 
-Separate OUTPUT 1 and OUTPUT 2 with:
+Separate OUTPUT 1 and OUTPUT 2 using:
 
 ===SPLIT_HERE===
 
@@ -436,7 +436,7 @@ SOURCE TEXT:
                     st.session_state.quiz_checked = False
 
                     st.toast(
-                        "Study kit generated!"
+                        "✅ Study kit generated!"
                     )
 
                     st.rerun()
@@ -469,7 +469,7 @@ else:
     lecture_text = ""
 
     # =============================
-    # TEXT INPUT
+    # PASTE TEXT
     # =============================
     if input_type == "📋 Paste Text":
 
@@ -479,7 +479,7 @@ else:
         )
 
     # =============================
-    # PDF INPUT
+    # PDF UPLOAD
     # =============================
     else:
 
@@ -522,7 +522,7 @@ else:
                 )
 
     # =============================
-    # PROCESS MATERIAL
+    # PROCESS BUTTON
     # =============================
     if st.button(
         "🚀 Process Material",
@@ -547,7 +547,7 @@ else:
                     # SUMMARY
                     # =============================
                     summary_prompt = f"""
-Create EXACTLY 5 bullet points.
+Create EXACTLY 5 important bullet points.
 
 Language:
 {selected_language}
@@ -562,8 +562,7 @@ TEXT:
                             messages=[
                                 {
                                     "role": "user",
-                                    "content":
-                                    summary_prompt
+                                    "content": summary_prompt
                                 }
                             ]
                         )
@@ -601,7 +600,7 @@ Format:
 Requirements:
 - Exactly 10 questions
 - Exactly 4 options per question
-- correct_index must be 0-3
+- correct_index must be between 0 and 3
 - Language: {selected_language}
 
 TEXT:
@@ -614,13 +613,11 @@ TEXT:
                             messages=[
                                 {
                                     "role": "user",
-                                    "content":
-                                    quiz_prompt
+                                    "content": quiz_prompt
                                 }
                             ],
                             response_format={
-                                "type":
-                                "json_object"
+                                "type": "json_object"
                             }
                         )
                     )
@@ -634,14 +631,8 @@ TEXT:
 
                     raw_json = (
                         raw_json
-                        .replace(
-                            "```json",
-                            ""
-                        )
-                        .replace(
-                            "```",
-                            ""
-                        )
+                        .replace("```json", "")
+                        .replace("```", "")
                         .strip()
                     )
 
@@ -665,28 +656,17 @@ TEXT:
                         st.stop()
 
                     if (
-                        isinstance(
-                            parsed_data,
-                            dict
-                        )
-                        and "questions"
-                        in parsed_data
+                        isinstance(parsed_data, dict)
+                        and "questions" in parsed_data
                     ):
 
                         st.session_state.quiz_data = (
-                            parsed_data[
-                                "questions"
-                            ]
+                            parsed_data["questions"]
                         )
 
                     elif (
-                        isinstance(
-                            parsed_data,
-                            dict
-                        )
-                        and len(
-                            parsed_data.keys()
-                        ) == 1
+                        isinstance(parsed_data, dict)
+                        and len(parsed_data.keys()) == 1
                     ):
 
                         st.session_state.quiz_data = (
@@ -717,6 +697,6 @@ TEXT:
                     )
 
     # =============================
-    # RESULTS
+    # DISPLAY RESULTS
     # =============================
     display_summary_and_quiz()
